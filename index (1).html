@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Tania Abundancia</title>
+<!--
+  CALENDARIO TANIA ABUNDANCIA (con recordatorios y calendario compartido)
+
+  REGLAS DE FIRESTORE (Firestore Database → Reglas). Pega TODO esto y Publicar:
+
+       rules_version = '2';
+       service cloud.firestore {
+         match /databases/{db}/documents {
+
+           match /users/{uid}/events/{id} {
+             allow read, write: if request.auth != null && request.auth.uid == uid;
+           }
+           match /users/{uid}/tania_events/{id} {
+             allow read, write: if request.auth != null && request.auth.uid == uid;
+           }
+
+           match /tania_calendars/{calId} {
+             allow create: if request.auth != null && request.auth.uid == calId
+                           && request.resource.data.ownerUid == request.auth.uid;
+             allow read: if request.auth != null && (request.auth.uid == calId ||
+                           (request.auth.token.email_verified == true
+                            && request.auth.token.email in resource.data.members));
+             allow update, delete: if request.auth != null && request.auth.uid == calId;
+
+             match /events/{id} {
+               allow read, write: if request.auth != null && (request.auth.uid == calId ||
+                 (request.auth.token.email_verified == true
+                  && request.auth.token.email in
+                     get(/databases/$(db)/documents/tania_calendars/$(calId)).data.members));
+             }
+           }
+         }
+       }
+
+  Authentication → Settings → Authorized domains: atwork872025-a11y.github.io
+-->
+<style>
+:root{
+  --bg:#ffffff;--fg:#1f2430;--muted:#8a90a0;--line:#eceef3;--card:#f7f8fb;--accent:#7c8cf8;
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#121316;--fg:#eceef3;--muted:#8d93a3;--line:#24262c;--card:#1b1d22;--accent:#9aa6ff}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{max-width:640px;margin:0 auto;padding:env(safe-area-inset-top) 12px 90px}
+.brand{padding:16px 2px 0;font-size:13px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.calbar{display:flex;gap:8px;align-items:center;margin:8px 0 2px}
+.calbar select{flex:1;min-width:0;font:inherit;font-size:14px;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px}
+.calbar button{border:0;background:var(--card);color:var(--fg);height:38px;padding:0 12px;border-radius:12px;font-size:14px;cursor:pointer;white-space:nowrap}
+header{display:flex;align-items:center;gap:6px;padding:6px 0 8px}
+header h1{flex:1;font-size:22px;margin:0;text-transform:capitalize}
+.ib{border:0;background:var(--card);color:var(--fg);width:38px;height:38px;border-radius:12px;font-size:18px;cursor:pointer}
+.today-btn{border:0;background:var(--card);color:var(--fg);height:38px;padding:0 12px;border-radius:12px;font-size:14px;cursor:pointer}
+#banner{font-size:12.5px;color:var(--muted);background:var(--card);border-radius:10px;padding:8px 10px;margin:4px 0 8px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+#banner button{border:0;background:var(--accent);color:#fff;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer}
+.dow,.grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.dow div{text-align:center;font-size:12px;color:var(--muted);padding:6px 0}
+.grid{border-top:1px solid var(--line)}
+.cell{min-height:72px;border-bottom:1px solid var(--line);padding:3px 2px;overflow:hidden;cursor:pointer}
+.cell.out{opacity:.35}
+.num{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;font-size:13px;border-radius:50%;margin-left:2px}
+.cell.today .num{background:var(--accent);color:#fff;font-weight:600}
+.cell.sel{background:var(--card)}
+#cal{overflow:hidden;touch-action:pan-y}
+#grid{will-change:transform,opacity}
+.chip{font-weight:700;font-size:10.5px;line-height:1.25;border-radius:4px;padding:1px 3px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#2b2f3a}
+.more{font-size:10px;color:var(--muted);margin:2px 0 0 3px}
+#dayTitle{font-size:15px;font-weight:600;margin:18px 2px 8px;text-transform:capitalize}
+.ev{display:flex;gap:10px;border-radius:14px;padding:11px 12px;margin-bottom:8px;cursor:pointer;color:#2b2f3a}
+.ev .t{font-size:12.5px;font-weight:700;min-width:74px;opacity:.85;padding-top:1px}
+.ev .b{flex:1}
+.ev .b b{display:block;font-size:15px;font-weight:800}
+.ev .b span{font-size:12.5px;font-weight:600;opacity:.8}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:18px}
+#fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:18px;border:0;background:var(--accent);color:#fff;font-size:30px;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer}
+#toasts{position:fixed;left:12px;right:12px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:50;display:flex;flex-direction:column;gap:8px;max-width:616px;margin:0 auto}
+.toast{background:var(--accent);color:#fff;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:700;box-shadow:0 8px 22px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center;justify-content:space-between}
+.toast button{border:0;background:rgba(255,255,255,.25);color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
+dialog{border:0;border-radius:20px;padding:0;width:min(92vw,420px);background:var(--bg);color:var(--fg);box-shadow:0 20px 50px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+form,.box{padding:18px;display:flex;flex-direction:column;gap:12px}
+form h2,.box h2{margin:0;font-size:18px}
+label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;flex:1}
+input,textarea,select{font:inherit;font-size:16px;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;width:100%}
+.row{display:flex;gap:10px}
+.colors{display:flex;gap:10px;flex-wrap:wrap}
+.colors button{width:34px;height:34px;border-radius:50%;border:3px solid transparent;cursor:pointer}
+.colors button.on{border-color:var(--fg)}
+.actions{display:flex;gap:8px;margin-top:4px}
+.actions button,.linkbtn{border:0;border-radius:12px;padding:12px;font-size:15px;cursor:pointer}
+.actions button{flex:1}
+.linkbtn{background:var(--card);color:var(--fg);font-size:14px;padding:10px}
+#save,#shAdd{background:var(--accent);color:#fff}
+#shAdd{border:0;border-radius:12px;padding:0 14px;font-size:15px;cursor:pointer}
+#cancel,#shCopy,#shClose{background:var(--card);color:var(--fg)}
+#del{background:#ffd6d6;color:#8a2020;flex:0 0 auto;padding:12px 16px}
+.hint{font-size:12.5px;color:var(--muted);margin:0;line-height:1.4}
+.mem{display:flex;justify-content:space-between;align-items:center;background:var(--card);border-radius:10px;padding:8px 10px;font-size:14px;gap:8px}
+.mem span{overflow:hidden;text-overflow:ellipsis}
+.mem button{border:0;background:transparent;color:#c03a3a;cursor:pointer;font-size:14px}
+</style>
+</head>
+<body>
+
+<div class="brand">✨ Tania Abundancia</div>
+<div class="calbar" id="calbar" hidden>
+  <select id="calSel" aria-label="Calendario"></select>
+  <button id="shareBtn" hidden>👥 Compartir</button>
+</div>
+<header>
+  <button class="ib" id="prev" aria-label="Mes anterior">‹</button>
+  <h1 id="title"></h1>
+  <button class="today-btn" id="todayBtn">Hoy</button>
+  <button class="ib" id="next" aria-label="Mes siguiente">›</button>
+</header>
+<div id="banner" hidden></div>
+<div class="dow" id="dow"></div>
+<div id="cal"><div class="grid" id="grid"></div></div>
+<div id="dayTitle"></div>
+<div id="list"></div>
+<button id="fab" aria-label="Nuevo evento">+</button>
+<div id="toasts"></div>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2 id="dlgTitle">Nuevo evento</h2>
+    <label>Título<input id="fTitle" required maxlength="80" placeholder="Ej. Cita médica"></label>
+    <label>Fecha<input id="fDate" type="date" required></label>
+    <div class="row">
+      <label>Inicio<input id="fStart" type="time"></label>
+      <label>Fin<input id="fEnd" type="time"></label>
+    </div>
+    <label>Recordatorio<select id="fRemind"></select></label>
+    <div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Color</div>
+      <div class="colors" id="colors"></div>
+    </div>
+    <label>Notas<textarea id="fNotes" rows="2"></textarea></label>
+    <button type="button" class="linkbtn" id="icsBtn">📅 Agregar al calendario del teléfono (con alarma)</button>
+    <div class="actions">
+      <button type="button" id="del" hidden>Borrar</button>
+      <button type="button" id="cancel">Cancelar</button>
+      <button type="submit" id="save">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="shareDlg">
+  <div class="box">
+    <h2>Compartir calendario</h2>
+    <p class="hint">Escribe el correo de Google de la persona. Cuando abra esta página y entre con ese correo, verá tu calendario y podrá agregar y editar eventos. No se envía ningún mensaje: pásale el link tú.</p>
+    <div class="row">
+      <input id="shEmail" type="email" inputmode="email" autocomplete="off" placeholder="correo@gmail.com">
+      <button type="button" id="shAdd">Invitar</button>
+    </div>
+    <div id="shList" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div class="actions">
+      <button type="button" id="shCopy">Copiar link</button>
+      <button type="button" id="shClose">Cerrar</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ====== firebaseConfig ====== */
+const firebaseConfig = {
+  apiKey: "AIzaSyCsxOtJ9ELnzSjS-G6KJeizZ8oRL7NH94g",
+  authDomain: "ac-calendar-c4161.firebaseapp.com",
+  projectId: "ac-calendar-c4161",
+  storageBucket: "ac-calendar-c4161.firebasestorage.app",
+  messagingSenderId: "79612578878",
+  appId: "1:79612578878:web:2c160b81244c7b23f3956f"
+};
+/* ============================ */
+
+const PASTELS = ["#ffd6e0","#ffe5c7","#fff6bf","#d4f5d0","#c9f0ef","#cfe3ff","#e1d6ff","#f3d4f0"];
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const DIAS = ["D","L","M","M","J","V","S"];
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2,"0");
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y,m-1,d); };
+const newId = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random().toString(36).slice(2);
+
+let cur = new Date(); cur.setDate(1);
+let sel = ymd(new Date());
+let events = [];
+let editing = null;
+let pendingId = null;
+let color = PASTELS[0];
+
+/* ---------- Almacenamiento (nube o local) ---------- */
+const cloud = !!firebaseConfig.apiKey;
+let col = null, auth = null, db = null, me = null;
+let ownCalId = null, curCalId = null, ownDoc = null, sharedCals = [];
+let unsubEvents = null, unsubShared = null, unsubOwn = null;
+const LS = "tania-abundancia-eventos";
+
+function loadLocal(){ try{ events = JSON.parse(localStorage.getItem(LS)) || []; }catch(e){ events = []; } }
+function saveLocal(){ try{ localStorage.setItem(LS, JSON.stringify(events)); }catch(e){} }
+
+async function saveEvent(ev){
+  if(cloud && col){ await col.doc(ev.id).set(ev); }
+  else{
+    const i = events.findIndex(e=>e.id===ev.id);
+    if(i>=0) events[i]=ev; else events.push(ev);
+    saveLocal(); render();
+  }
+}
+async function removeEvent(id){
+  if(cloud && col){ await col.doc(id).delete(); }
+  else{ events = events.filter(e=>e.id!==id); saveLocal(); render(); }
+}
+
+function setBanner(html, btnText, btnFn){
+  const b = $("banner");
+  if(!html){ b.hidden = true; return; }
+  b.hidden = false; b.innerHTML = "";
+  const sp = document.createElement("span"); sp.textContent = html; b.appendChild(sp);
+  if(btnText){
+    const bt = document.createElement("button");
+    bt.textContent = btnText; bt.onclick = btnFn; b.appendChild(bt);
+  }
+}
+
+/* Crea tu calendario compartible la primera vez y trae los eventos antiguos de Tania */
+async function ensureOwnCalendar(user){
+  const ref = db.collection("tania_calendars").doc(user.uid);
+  const snap = await ref.get();
+  if(snap.exists) return;
+  await ref.set({
+    ownerUid: user.uid,
+    ownerEmail: (user.email||"").toLowerCase(),
+    members: [],
+    created: Date.now()
+  });
+  try{
+    const old = await db.collection("users").doc(user.uid).collection("tania_events").get();
+    if(!old.empty){
+      const batch = db.batch();
+      old.forEach(d=>batch.set(ref.collection("events").doc(d.id), d.data()));
+      await batch.commit();
+    }
+  }catch(e){ /* si no hay eventos antiguos o faltan permisos, se sigue sin migrar */ }
+}
+
+function openCalendar(id){
+  if(unsubEvents){ unsubEvents(); unsubEvents = null; }
+  curCalId = id;
+  col = db.collection("tania_calendars").doc(id).collection("events");
+  unsubEvents = col.onSnapshot(snap=>{
+    events = snap.docs.map(d=>({id:d.id,...d.data()}));
+    render(); checkReminders();
+  }, err=>alert("Error de sincronización: "+err.message));
+  $("shareBtn").hidden = id !== ownCalId;
+  if($("calSel").value !== id) $("calSel").value = id;
+}
+
+function buildCalSelect(){
+  const s = $("calSel"); s.innerHTML = "";
+  const add = (v,t)=>{ const o = document.createElement("option"); o.value = v; o.textContent = t; s.appendChild(o); };
+  add(ownCalId, "Mi calendario");
+  sharedCals.forEach(c=>add(c.id, "Calendario de " + (c.ownerEmail || "otra persona")));
+  s.value = curCalId || ownCalId;
+  $("calbar").hidden = false;
+  $("shareBtn").hidden = (curCalId || ownCalId) !== ownCalId;
+}
+
+function initStorage(){
+  if(!cloud){
+    loadLocal();
+    setBanner("Modo local: los eventos solo se guardan en este teléfono.");
+    render(); return;
+  }
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+  loadLocal(); render();
+  auth.onAuthStateChanged(async user=>{
+    [unsubEvents, unsubShared, unsubOwn].forEach(u=>{ if(u) u(); });
+    unsubEvents = unsubShared = unsubOwn = null;
+    $("calbar").hidden = true;
+    col = null; ownDoc = null; sharedCals = []; curCalId = null;
+    if(!user){
+      me = null; loadLocal(); render();
+      setBanner("Inicia sesión para sincronizar tus eventos.", "Entrar con Google", ()=>auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>alert("No se pudo iniciar sesión: "+e.message)));
+      return;
+    }
+    me = user; ownCalId = user.uid;
+    setBanner(`Sincronizado · ${user.email}`, "Salir", ()=>auth.signOut());
+    try{ await ensureOwnCalendar(user); }
+    catch(err){ alert("No se pudo preparar tu calendario: "+err.message+"\n¿Publicaste las reglas nuevas de Firestore?"); return; }
+    const email = (user.email||"").toLowerCase();
+    unsubOwn = db.collection("tania_calendars").doc(ownCalId).onSnapshot(s=>{ ownDoc = s.data() || null; renderMembers(); });
+    unsubShared = db.collection("tania_calendars").where("members","array-contains",email).onSnapshot(s=>{
+      sharedCals = s.docs.map(d=>({id:d.id,...d.data()}));
+      buildCalSelect();
+      if(curCalId !== ownCalId && !sharedCals.some(c=>c.id===curCalId)) openCalendar(ownCalId);
+    }, ()=>{ sharedCals = []; buildCalSelect(); });
+    buildCalSelect();
+    openCalendar(ownCalId);
+  });
+}
+
+$("calSel").onchange = e=>openCalendar(e.target.value);
+
+/* ---------- Compartir por correo ---------- */
+function renderMembers(){
+  const box = $("shList"); box.innerHTML = "";
+  const ms = (ownDoc && ownDoc.members) || [];
+  if(!ms.length){ const p = document.createElement("p"); p.className = "hint"; p.textContent = "Aún no has invitado a nadie."; box.appendChild(p); return; }
+  ms.forEach(m=>{
+    const r = document.createElement("div"); r.className = "mem";
+    const sp = document.createElement("span"); sp.textContent = m;
+    const b = document.createElement("button"); b.type = "button"; b.textContent = "Quitar";
+    b.onclick = async ()=>{
+      if(!confirm(`¿Quitar a ${m}? Ya no podrá ver tu calendario.`)) return;
+      try{ await db.collection("tania_calendars").doc(ownCalId).update({members: firebase.firestore.FieldValue.arrayRemove(m)}); }
+      catch(e){ alert("No se pudo quitar: "+e.message); }
+    };
+    r.append(sp, b); box.appendChild(r);
+  });
+}
+$("shareBtn").onclick = ()=>{ renderMembers(); $("shEmail").value = ""; $("shareDlg").showModal(); };
+$("shAdd").onclick = async ()=>{
+  const email = $("shEmail").value.trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ alert("Escribe un correo válido."); return; }
+  if(me && email === (me.email||"").toLowerCase()){ alert("Ese es tu propio correo."); return; }
+  try{
+    await db.collection("tania_calendars").doc(ownCalId).update({members: firebase.firestore.FieldValue.arrayUnion(email)});
+    $("shEmail").value = "";
+  }catch(e){ alert("No se pudo invitar: "+e.message); }
+};
+$("shCopy").onclick = async ()=>{
+  const url = location.origin + location.pathname;
+  try{ await navigator.clipboard.writeText(url); $("shCopy").textContent = "¡Copiado!"; setTimeout(()=>{ $("shCopy").textContent = "Copiar link"; }, 1500); }
+  catch(e){ prompt("Copia este link:", url); }
+};
+$("shClose").onclick = ()=>$("shareDlg").close();
+
+/* ---------- Recordatorios ---------- */
+const REMIND_OPTS = [["","Sin recordatorio"],["0","A la hora del evento"],["10","10 min antes"],["30","30 min antes"],["60","1 hora antes"],["1440","1 día antes"]];
+REMIND_OPTS.forEach(([v,t])=>{ const o = document.createElement("option"); o.value = v; o.textContent = t; $("fRemind").appendChild(o); });
+
+const hasRemind = e => e.remind !== undefined && e.remind !== null && e.remind !== "";
+function startMs(e){
+  const [y,m,d] = e.date.split("-").map(Number);
+  const [hh,mm] = (e.start || "09:00").split(":").map(Number);
+  return new Date(y, m-1, d, hh, mm).getTime();
+}
+function triggerTime(e){ return hasRemind(e) ? startMs(e) - Number(e.remind)*60000 : null; }
+
+const FIRED = "tania-recordatorios-avisados";
+function getFired(){ try{ return JSON.parse(localStorage.getItem(FIRED)) || {}; }catch(e){ return {}; } }
+function setFired(o){ try{ localStorage.setItem(FIRED, JSON.stringify(o)); }catch(e){} }
+
+function toast(msg){
+  const t = document.createElement("div"); t.className = "toast";
+  const sp = document.createElement("span"); sp.textContent = msg;
+  const b = document.createElement("button"); b.textContent = "OK"; b.onclick = ()=>t.remove();
+  t.append(sp, b); $("toasts").appendChild(t);
+  setTimeout(()=>t.remove(), 60000);
+}
+function notify(e){
+  const when = e.start || "todo el día";
+  toast(`⏰ ${e.title} · ${when}`);
+  try{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }catch(_){}
+  try{ if("Notification" in window && Notification.permission === "granted") new Notification("Tania Abundancia", {body: `${e.title} · ${e.date} ${when}`}); }catch(_){}
+}
+/* Avisa cuando llega la hora (solo mientras la página está abierta) */
+function checkReminders(){
+  const now = Date.now(), fired = getFired(); let changed = false;
+  events.forEach(e=>{
+    const t = triggerTime(e); if(t === null) return;
+    const key = e.id + "@" + t;
+    if(fired[key]) return;
+    if(now >= t && now - t < 6*3600*1000){ fired[key] = now; changed = true; notify(e); }
+  });
+  for(const k in fired){ if(now - fired[k] > 14*864e5){ delete fired[k]; changed = true; } }
+  if(changed) setFired(fired);
+}
+setInterval(checkReminders, 30000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) checkReminders(); });
+
+/* Archivo .ics con alarma para el calendario del teléfono */
+function icsText(e){
+  const esc = s=>String(s||"").replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");
+  const fold = l=>{ let out = ""; while(l.length > 74){ out += l.slice(0,74) + "\r\n "; l = l.slice(74); } return out + l; };
+  const day = e.date.replace(/-/g,"");
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"");
+  const rem = hasRemind(e) ? Number(e.remind) : 10;
+  const L = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tania Abundancia//ES","CALSCALE:GREGORIAN","BEGIN:VEVENT","UID:"+e.id+"@tania-abundancia","DTSTAMP:"+stamp];
+  let trig;
+  if(e.start){
+    let en;
+    if(e.end && e.end > e.start) en = e.end.replace(":","") + "00";
+    else{
+      const [h,m] = e.start.split(":").map(Number); const t = h*60 + m + 60;
+      en = t >= 1440 ? "235900" : pad(Math.floor(t/60)) + pad(t%60) + "00";
+    }
+    L.push("DTSTART:"+day+"T"+e.start.replace(":","")+"00", "DTEND:"+day+"T"+en);
+    trig = "-PT"+rem+"M";
+  }else{
+    const n = parse(e.date); n.setDate(n.getDate()+1);
+    L.push("DTSTART;VALUE=DATE:"+day, "DTEND;VALUE=DATE:"+ymd(n).replace(/-/g,""));
+    const mins = 540 - rem;   /* eventos de todo el día: aviso a partir de las 9:00 a. m. */
+    trig = mins >= 0 ? "PT"+mins+"M" : "-PT"+(-mins)+"M";
+  }
+  L.push("SUMMARY:"+esc(e.title));
+  if(e.notes) L.push("DESCRIPTION:"+esc(e.notes));
+  L.push("BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:"+esc(e.title),"TRIGGER:"+trig,"END:VALARM","END:VEVENT","END:VCALENDAR");
+  return L.map(fold).join("\r\n") + "\r\n";
+}
+function downloadIcs(e){
+  const blob = new Blob([icsText(e)], {type:"text/calendar;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = ((e.title||"evento").replace(/[^\w\- áéíóúñÁÉÍÓÚÑ]/g,"").trim().slice(0,40).replace(/\s+/g,"-") || "evento") + ".ics";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+
+/* ---------- Render ---------- */
+/* Eventos automáticos: días al azar (iguales en todos tus dispositivos) */
+const CELEBRATE_TEXT = "Celebrating everything going right";
+const CELEBRATE_PER_MONTH = 3;   // cambia este número para más o menos días por mes
+const CELEBRATE_COLOR = "#fff1b8";
+function rng(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const celCache = {};
+function celebrationDays(y, m){
+  const k = y + "-" + m;
+  if(celCache[k]) return celCache[k];
+  const dim = new Date(y, m+1, 0).getDate();
+  const r = rng(y*12 + m + 7);
+  const set = new Set();
+  while(set.size < Math.min(CELEBRATE_PER_MONTH, dim)) set.add(1 + Math.floor(r()*dim));
+  return celCache[k] = set;
+}
+function autoEventsOn(s){
+  const d = parse(s);
+  if(!celebrationDays(d.getFullYear(), d.getMonth()).has(d.getDate())) return [];
+  return [{id:"auto-"+s, auto:true, title:CELEBRATE_TEXT, date:s, start:"", end:"", color:CELEBRATE_COLOR, notes:"✨ Evento automático"}];
+}
+
+function eventsOn(d){
+  return events.filter(e=>e.date===d)
+    .sort((a,b)=>(a.start||"99:99").localeCompare(b.start||"99:99"))
+    .concat(autoEventsOn(d));
+}
+
+function render(){
+  $("title").textContent = `${MESES[cur.getMonth()]} ${cur.getFullYear()}`;
+  const grid = $("grid"); grid.innerHTML = "";
+  const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+  const start = new Date(first); start.setDate(1 - first.getDay());
+  const todayS = ymd(new Date());
+  for(let i=0;i<42;i++){
+    const d = new Date(start); d.setDate(start.getDate()+i);
+    const s = ymd(d);
+    const c = document.createElement("div");
+    c.className = "cell" + (d.getMonth()!==cur.getMonth()?" out":"") + (s===todayS?" today":"") + (s===sel?" sel":"");
+    c.innerHTML = `<span class="num">${d.getDate()}</span>`;
+    const evs = eventsOn(s);
+    evs.slice(0,3).forEach(e=>{
+      const ch = document.createElement("div");
+      ch.className = "chip"; ch.style.background = e.color || PASTELS[0];
+      ch.textContent = e.title; c.appendChild(ch);
+    });
+    if(evs.length>3){ const m = document.createElement("div"); m.className="more"; m.textContent=`+${evs.length-3} más`; c.appendChild(m); }
+    c.onclick = ()=>{ sel = s; if(d.getMonth()!==cur.getMonth()){ cur = new Date(d.getFullYear(), d.getMonth(), 1); } render(); };
+    c.ondblclick = ()=>openDlg(null, s);
+    grid.appendChild(c);
+  }
+  renderList();
+}
+
+function renderList(){
+  const d = parse(sel);
+  const names = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+  $("dayTitle").textContent = `${names[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
+  const list = $("list"); list.innerHTML = "";
+  const evs = eventsOn(sel);
+  if(!evs.length){ list.innerHTML = `<div class="empty">Sin eventos este día</div>`; return; }
+  evs.forEach(e=>{
+    const el = document.createElement("div");
+    el.className = "ev"; el.style.background = e.color || PASTELS[0];
+    const time = e.start ? (e.end ? `${e.start} – ${e.end}` : e.start) : "Todo el día";
+    el.innerHTML = `<div class="t">${time}</div><div class="b"><b></b><span></span></div>`;
+    el.querySelector("b").textContent = e.title;
+    el.querySelector("span").textContent = e.notes || "";
+    if(!e.auto) el.onclick = ()=>openDlg(e);
+    list.appendChild(el);
+  });
+}
+
+/* ---------- Diálogo ---------- */
+function buildColors(){
+  const box = $("colors"); box.innerHTML = "";
+  PASTELS.forEach(p=>{
+    const b = document.createElement("button");
+    b.type = "button"; b.style.background = p;
+    if(p===color) b.className = "on";
+    b.onclick = ()=>{ color = p; buildColors(); };
+    box.appendChild(b);
+  });
+}
+
+function openDlg(ev, date){
+  editing = ev;
+  pendingId = ev ? ev.id : newId();
+  $("dlgTitle").textContent = ev ? "Editar evento" : "Nuevo evento";
+  $("fTitle").value = ev ? ev.title : "";
+  $("fDate").value = ev ? ev.date : (date || sel);
+  $("fStart").value = ev ? (ev.start||"") : "";
+  $("fEnd").value = ev ? (ev.end||"") : "";
+  $("fRemind").value = ev && hasRemind(ev) ? String(ev.remind) : "";
+  $("fNotes").value = ev ? (ev.notes||"") : "";
+  color = ev ? (ev.color || PASTELS[0]) : PASTELS[Math.floor(Math.random()*PASTELS.length)];
+  $("del").hidden = !ev;
+  buildColors();
+  $("dlg").showModal();
+}
+
+function formEvent(){
+  return {
+    id: pendingId,
+    title: $("fTitle").value.trim(),
+    date: $("fDate").value,
+    start: $("fStart").value,
+    end: $("fEnd").value,
+    remind: $("fRemind").value,
+    color,
+    notes: $("fNotes").value.trim()
+  };
+}
+
+$("icsBtn").onclick = ()=>{
+  const ev = formEvent();
+  if(!ev.title || !ev.date){ alert("Escribe el título y la fecha primero."); return; }
+  downloadIcs(ev);
+};
+
+$("form").addEventListener("submit", async e=>{
+  e.preventDefault();
+  if(cloud && !col){ alert("Inicia sesión con Google para guardar."); return; }
+  const ev = formEvent();
+  if(!ev.title || !ev.date) return;
+  if(hasRemind(ev) && "Notification" in window && Notification.permission === "default" && !matchMedia("(pointer:coarse)").matches){
+    try{ Notification.requestPermission(); }catch(_){}
+  }
+  /* si el aviso ya pasó, no lo dispares de inmediato */
+  const t = triggerTime(ev);
+  if(t !== null && t <= Date.now()){ const f = getFired(); f[ev.id+"@"+t] = Date.now(); setFired(f); }
+  try{ await saveEvent(ev); }catch(err){ alert("No se pudo guardar: "+err.message); return; }
+  sel = ev.date;
+  const d = parse(ev.date); cur = new Date(d.getFullYear(), d.getMonth(), 1);
+  $("dlg").close(); render();
+});
+$("cancel").onclick = ()=>$("dlg").close();
+$("del").onclick = async ()=>{
+  if(editing && confirm("¿Borrar este evento?")){ await removeEvent(editing.id); $("dlg").close(); }
+};
+
+/* ---------- Navegación ---------- */
+const cal = $("cal"), gridEl = $("grid");
+let busy = false;
+
+function changeMonth(dir){
+  if(busy) return;
+  busy = true;
+  const W = cal.offsetWidth || 360;
+  gridEl.style.transition = "transform .18s ease-in, opacity .18s";
+  gridEl.style.transform = `translateX(${-dir*W}px)`;
+  gridEl.style.opacity = "0";
+  setTimeout(()=>{
+    cur = new Date(cur.getFullYear(), cur.getMonth()+dir, 1);
+    const n = new Date();
+    sel = (n.getFullYear()===cur.getFullYear() && n.getMonth()===cur.getMonth()) ? ymd(n) : ymd(cur);
+    render();
+    gridEl.style.transition = "none";
+    gridEl.style.transform = `translateX(${dir*W}px)`;
+    gridEl.style.opacity = "0";
+    void gridEl.offsetWidth;
+    gridEl.style.transition = "transform .22s ease-out, opacity .22s";
+    gridEl.style.transform = "translateX(0)";
+    gridEl.style.opacity = "1";
+    setTimeout(()=>{ gridEl.style.transition = ""; gridEl.style.transform = ""; gridEl.style.opacity = ""; busy = false; }, 240);
+  }, 180);
+}
+
+function snapBack(){
+  gridEl.style.transition = "transform .2s ease, opacity .2s";
+  gridEl.style.transform = "";
+  gridEl.style.opacity = "";
+}
+
+/* Swipe izquierda/derecha para cambiar de mes */
+let sx = 0, sy = 0, dx = 0, drag = false, lock = null;
+cal.addEventListener("touchstart", e=>{
+  if(busy || e.touches.length !== 1) return;
+  sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+  dx = 0; drag = true; lock = null;
+  gridEl.style.transition = "none";
+}, {passive:true});
+cal.addEventListener("touchmove", e=>{
+  if(!drag) return;
+  const x = e.touches[0].clientX - sx, y = e.touches[0].clientY - sy;
+  if(lock === null && (Math.abs(x) > 8 || Math.abs(y) > 8)) lock = Math.abs(x) > Math.abs(y)*1.2 ? "h" : "v";
+  if(lock === "h"){
+    dx = x;
+    gridEl.style.transform = `translateX(${dx*0.7}px)`;
+    gridEl.style.opacity = String(1 - Math.min(Math.abs(dx)/600, .4));
+  }
+}, {passive:true});
+cal.addEventListener("touchend", ()=>{
+  if(!drag) return;
+  drag = false;
+  if(lock === "h" && Math.abs(dx) > 60) changeMonth(dx < 0 ? 1 : -1);
+  else snapBack();
+});
+cal.addEventListener("touchcancel", ()=>{ drag = false; snapBack(); });
+
+$("prev").onclick = ()=>changeMonth(-1);
+$("next").onclick = ()=>changeMonth(1);
+$("todayBtn").onclick = ()=>{ const n = new Date(); cur = new Date(n.getFullYear(), n.getMonth(), 1); sel = ymd(n); render(); };
+$("fab").onclick = ()=>openDlg(null, sel);
+$("dow").innerHTML = DIAS.map(d=>`<div>${d}</div>`).join("");
+
+initStorage();
+checkReminders();
+</script>
+</body>
+</html>
